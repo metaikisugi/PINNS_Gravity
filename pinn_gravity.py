@@ -128,11 +128,12 @@ for epoch in range(epochs_phase2):
     y_phys = output_phys[:, 1:2]
     
     # Correctly compute derivatives for x and y separately
-    dx_dt = torch.autograd.grad(x_phys, t_phys, grad_outputs=torch.ones_like(x_phys), create_graph=True)[0]
-    dy_dt = torch.autograd.grad(y_phys, t_phys, grad_outputs=torch.ones_like(y_phys), create_graph=True)[0]
+    # Use .sum() to differentiate as scalar, identical to debug_derivatives.py fix
+    dx_dt = torch.autograd.grad(x_phys.sum(), t_phys, create_graph=True)[0]
+    dy_dt = torch.autograd.grad(y_phys.sum(), t_phys, create_graph=True)[0]
     
-    d2x_dt2 = torch.autograd.grad(dx_dt, t_phys, grad_outputs=torch.ones_like(dx_dt), create_graph=True)[0]
-    d2y_dt2 = torch.autograd.grad(dy_dt, t_phys, grad_outputs=torch.ones_like(dy_dt), create_graph=True)[0]
+    d2x_dt2 = torch.autograd.grad(dx_dt.sum(), t_phys, create_graph=True)[0]
+    d2y_dt2 = torch.autograd.grad(dy_dt.sum(), t_phys, create_graph=True)[0]
     
     r_phys = torch.sqrt(x_phys**2 + y_phys**2)
     
