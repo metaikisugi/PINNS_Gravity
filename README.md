@@ -1,32 +1,79 @@
-# PINNs Gravity Derivation
+# PINNs 重力定数導出プロジェクト
 
-Physics-Informed Neural Network (PINN) to derive the Gravitational Constant ($G$) from Earth's orbital data.
+Physics-Informed Neural Network (PINN) を用いて、地球の公転軌道データから万有引力定数 $G$ を導出・逆算するプロジェクトです。
+物理法則（運動方程式）をニューラルネットワークの損失関数に組み込むことで、単なるデータフィッティングではなく、背後にある物理パラメータを学習します。
 
-## Overview
+## 概要
 
-This project demonstrates how a neural network can learn physical constants by observing motion.
-We simulate Earth's orbit around the Sun and train a network to satisfy two conditions simultaneously:
-1.  **Data Loss**: Match the observed position data.
-2.  **Physics Loss**: Satisfy Newton's Law of Universal Gravitation ($\ddot{\mathbf{r}} = -\frac{GM}{r^3}\mathbf{r}$).
+このプロジェクトでは、以下の2つの条件を同時に満たすようにAIを学習させます。
+1.  **観測データ**: AIの出力が、観測された地球の位置座標と一致すること。
+2.  **物理法則**: AIの出力する運動が、ニュートンの万有引力の法則 ($\ddot{\mathbf{r}} = -\frac{GM}{r^3}\mathbf{r}$) を満たすこと。
 
-By freezing the network weights after learning the orbit shape, we force the physics loss to optimize the only remaining variable: the gravitational constant $G$.
+しかし、単に学習させると「軌道を動かさない（加速度0）」ことで物理法則を満たそうとする「自明解の罠」に陥るため、**Freeze Strategy（ネットワーク凍結戦略）** を採用しています。
 
-## Results
+## 1. 学習プロセス (Approach)
 
-*   **True G**: $6.6743 \times 10^{-11} \, m^3 kg^{-1} s^{-2}$
-*   **Derived G**: $\approx 6.61 \times 10^{-11} \, m^3 kg^{-1} s^{-2}$
-*   **Error**: < 1.0%
+### Step 1: 物理モデルとスケーリング
+現実の数値（$10^{30}$ kgなど）は大きすぎて計算が不安定になるため、以下のように無次元化（スケーリング）して学習させます。
+*   **時間**: 地球の公転周期 $T$ (1年) で正規化 ($\hat{t} = t/T$)
+*   **距離**: 地球の軌道半径 $L$ (1 AU) で正規化 ($\hat{x} = x/L$)
+*   **学習パラメータ**: $G$ そのものではなく、無次元パラメータ $\Pi = \frac{G M T^2}{L^3}$ を学習し、最後に $G$ を復元します。
 
-![](result_real_scale.png)
+### Step 2: 2段階学習 (Freeze Strategy)
+*   **Phase 1 (Epoch 0-10000)**: **軌道形状の学習**
+    *   物理法則（Physics Loss）は無視し、教師データ（Data Loss）の学習に専念します。
+    *   目的: 正しい「円軌道」をニューラルネットワークに記憶させる。
+*   **Phase 2 (Epoch 10000-20000)**: **物理パラメータの導出**
+    *   **ネットワークの重みを凍結**します。
+    *   物理法則（Physics Loss）のみを有効化し、唯一の可変パラメータである $\Pi$ (G) だけを最適化します。
+    *   目的: 固定された軌道において、運動方程式が成立するような $G$ を探す。
 
-## Usage
+## 2. システム詳細 (Architecture & Data)
+
+### ニューラルネットワーク構成
+単純な多層パーセプトロン（MLP）を使用しています。
+*   **入力層 (Input Layer)**: **1ノード**
+    *   正規化された時刻 $\hat{t}$ ($0 \sim 1$)
+*   **中間層 (Hidden Layers)**: **3層 × 64ノード**
+    *   活性化関数: `Tanh` (Hyperbolic Tangent)
+    *   ※物理シミュレーションでは滑らかな高階微分が必要なため、ReLUではなくTanhを使用。
+*   **出力層 (Output Layer)**: **2ノード**
+    *   正規化された位置座標 $\hat{x}, \hat{y}$ ($-1 \sim 1$)
+
+### 教師データ (Training Data)
+NASA等のデータではなく、理論式から生成した理想的なシミュレーションデータを使用しています。
+*   **データ生成式**:
+    $$ x = \cos(2\pi t), \quad y = \sin(2\pi t) $$
+    （半径1、周期1の等速円運動）
+*   **データ点数**: 100点
+    *   1周分の軌道からサンプリング。Phase 1の学習に使用されます。
+
+### 損失関数 (Loss Functions)
+以下の2つの損失をフェーズに応じて切り替えます。
+
+#### A. データ損失 ($L_{data}$)
+AIの予測位置と教師データの誤差。
+$$ L_{data} = \frac{1}{N} \sum (\hat{\mathbf{r}}_{pred} - \hat{\mathbf{r}}_{true})^2 $$
+
+#### B. 物理損失 ($L_{physics}$)
+運動方程式の成立度合い（残留誤差）。AIの出力を自動微分して加速度を求めます。
+$$ L_{physics} = \left\| \frac{d^2\hat{\mathbf{r}}}{d\hat{t}^2} + \Pi \frac{\hat{\mathbf{r}}}{|\hat{\mathbf{r}}|^3} \right\|^2 $$
+ここで $\Pi$ は学習対象のパラメータです。Phase 2ではこの損失が0になるように $\Pi$ が更新されます。
+
+## 3. 結果 (Results)
+
+学習の結果、万有引力定数 $G$ を高精度に特定することに成功しました。
+
+*   **真値 (True G)**: $6.6743 \times 10^{-11} \, m^3 kg^{-1} s^{-2}$
+*   **導出値 (Derived G)**: $6.6130 \times 10^{-11} \, m^3 kg^{-1} s^{-2}$
+*   **誤差 (Error)**: **0.92%**
+
+![結果プロット](result_real_scale.png)
+左図: 学習中のパラメータ $\Pi$ の収束（赤破線が理論値）。
+右図: 再構成された軌道（赤線）と教師データ（黒点）。
+
+## 実行方法
 
 ```bash
 python pinn_gravity.py
 ```
-
-## Strategy: Freeze Network
-
-To avoid the "Zero Solution Trap" (where the network flattens the orbit to satisfy zero acceleration), we use a two-phase training strategy:
-1.  **Phase 1**: Train on Data Loss only (Learn the orbit shape).
-2.  **Phase 2**: Freeze network weights. Train on Physics Loss only (Derive $G$).
